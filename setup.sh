@@ -71,6 +71,7 @@ get_file() {
       exit 1
     fi
   fi
+  sudo chmod u+x $local_path
 }
 
 install_app() {
