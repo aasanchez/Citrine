@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 # Script to install your software package
-# Usage: curl http://yourserver.com/mypackage.sh | bash
 
 set -e  # Exit immediately if a command exits with non-zero status
 
@@ -36,37 +35,47 @@ clean_environment() {
   
   ROOT=$(pwd)
   
-  # Clean Docker containers and images
-  cd "$ROOT/core/Server" 2>/dev/null || {
-    echo_info "No existing Server directory found, skipping Docker cleanup..."
-    return 0
-  }
-  
-  echo_info "Stopping and removing Docker containers..."
-  docker compose down 2>/dev/null || true
-  docker compose rm -f 2>/dev/null || true
-  docker ps -aq --filter "label=com.docker.compose.project=$(basename $(pwd))" | xargs docker rm -f 2>/dev/null || true
-  docker compose down --volumes 2>/dev/null || true
-  docker images --filter "reference=$(basename $(pwd))*" -q | xargs docker rmi 2>/dev/null || true
-  
   # Reset git repository
-  cd "$ROOT/core" 2>/dev/null || {
-    echo_info "No existing core directory found, skipping git cleanup..."
-    return 0
-  }
+  if [ ! -d "$ROOT/core" ]; then
+    git clone https://github.com/citrineos/citrineos-core.git core
+  fi
+
+  cd "$ROOT/core/Server"
+  echo_info "Stopping and removing Docker containers..."
+  docker compose down && docker compose rm -f && docker ps -aq --filter "label=com.docker.compose.project=$(basename $(pwd))" | xargs docker rm -f && docker compose down --volumes && docker images --filter "reference=$(basename $(pwd))*" -q | xargs docker rmi
   
+  cd "$ROOT/core"
+  pwd
   echo_info "Resetting git repository..."
-  git status
   git reset --hard
   git clean -xfd
-  
-  cd "$ROOT" || exit 1
+  git status
+  cd "$ROOT"
 }
 
-# Main installation function
+get_file() {
+  local local_path="$1"
+  local github_path="$2"
+  local dir_path=$(dirname "$local_path")
+  
+  # Create directory if it doesn't exist
+  mkdir -p "$dir_path"
+  
+  if [ -f "$local_path" ]; then
+    echo_info "Using local file: $local_path"
+  else
+    echo_info "Downloading file from GitHub: $github_path"
+    curl -s -L "$github_path" -o "$local_path"
+    if [ $? -ne 0 ]; then
+      echo_error "Failed to download file from GitHub: $github_path"
+      exit 1
+    fi
+  fi
+}
+
 install_app() {
   ROOT=$(pwd)
-  
+  cd $ROOT/core
   echo_info "Installing dependencies..."
   npm run install-all
   
@@ -74,8 +83,15 @@ install_app() {
   npm run build
   
   echo_info "Setting up Docker environment..."
-  # Fix the problems with postgis on Mac
-  mkdir -p "$ROOT/core/Server/src" "$ROOT/core/Server"
+  # Create directories
+  mkdir -p "$ROOT/core/Server/src"
+  
+  # Get Dockerfile
+  get_file "$ROOT/Docker/core/Dockerfile" "https://raw.githubusercontent.com/aasanchez/Citrine/main/Docker/core/Dockerfile"
+  get_file "$ROOT/Docker/core/install-postgis.sh" "https://raw.githubusercontent.com/aasanchez/Citrine/main/Docker/core/install-postgis.sh"
+  get_file "$ROOT/Docker/core/docker-compose.yml" "https://raw.githubusercontent.com/aasanchez/Citrine/main/Docker/core/docker-compose.yml"
+  
+  # Copy files to the correct locations
   cp "$ROOT/Docker/core/Dockerfile" "$ROOT/core/Server/src/Dockerfile"
   cp "$ROOT/Docker/core/install-postgis.sh" "$ROOT/core/Server/src/install-postgis.sh"
   cp "$ROOT/Docker/core/docker-compose.yml" "$ROOT/core/Server/docker-compose.yml"
@@ -92,5 +108,5 @@ install_app() {
 echo_info "Starting installation process..."
 check_dependencies
 clean_environment
-# install_app
+install_app
 # echo_success "Installation completed successfully!"
